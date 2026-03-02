@@ -1,33 +1,23 @@
-"""OpenClaw client for communicating with the Anorak AI agent."""
+"""OpenClaw client for communicating with the Anorak AI agent via CLI."""
 
+import asyncio
+import json
 import logging
-import aiohttp
-from .config import settings
 
 logger = logging.getLogger(__name__)
 
 
 class OpenClawClient:
-    """HTTP client for sending messages to OpenClaw/Anorak."""
+    """CLI client for sending messages to OpenClaw/Anorak."""
 
     def __init__(self):
-        self.base_url = settings.OPENCLAW_URL.rstrip("/")
-        self.token = settings.OPENCLAW_TOKEN
-        self._session: aiohttp.ClientSession | None = None
-        self._conversation_history: list[dict] = []
-
-    async def _get_session(self) -> aiohttp.ClientSession:
-        """Get or create an aiohttp session."""
-        if self._session is None or self._session.closed:
-            headers = {"Content-Type": "application/json"}
-            if self.token:
-                headers["Authorization"] = f"Bearer {self.token}"
-            self._session = aiohttp.ClientSession(headers=headers)
-        return self._session
+        self.agent_id = "main"
+        self.container = "openclaw-minimax_openclaw-gateway_1"
+        self.cli_path = "/app/openclaw.mjs"
 
     async def send_message(self, user_message: str) -> str:
         """
-        Send a user message to OpenClaw and get Anorak's response.
+        Send a user message to OpenClaw via CLI and get Anorak's response.
 
         Args:
             user_message: The transcribed user speech
@@ -36,73 +26,76 @@ class OpenClawClient:
             Anorak's text response
         """
         try:
-            session = await self._get_session()
-
-            # Add user message to history
-            self._conversation_history.append({
-                "role": "user",
-                "content": user_message,
-            })
-
-            payload = {
-                "messages": self._conversation_history,
-            }
-
-            logger.info(f"Sending to OpenClaw: '{user_message[:80]}...' "
+            logger.info(f"Sending to OpenClaw CLI: '{user_message[:80]}...' "
                         if len(user_message) > 80
-                        else f"Sending to OpenClaw: '{user_message}'")
+                        else f"Sending to OpenClaw CLI: '{user_message}'")
 
-            # Try common OpenClaw endpoints
-            url = f"{self.base_url}/chat"
+            process = await asyncio.create_subprocess_exec(
+                "docker", "exec", "-i", self.container,
+                self.cli_path, "agent",
+                "--agent", self.agent_id,
+                "--message", user_message,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
 
-            async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=60)) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    logger.error(f"OpenClaw error {response.status}: {error_text}")
-                    raise Exception(f"OpenClaw returned status {response.status}: {error_text}")
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=120,  # 2 minute timeout for AI response
+            )
 
-                data = await response.json()
+            if process.returncode != 0:
+                error_msg = stderr.decode().strip() if stderr else "Unknown error"
+                logger.error(f"OpenClaw CLI error (exit {process.returncode}): {error_msg}")
+                raise Exception(f"OpenClaw CLI failed: {error_msg}")
 
-                # Try to extract response from common response formats
+            raw_output = stdout.decode().strip()
+
+            if not raw_output:
+                logger.warning("Empty response from OpenClaw CLI")
+                return "I didn't have a response for that."
+
+            # Parse JSON output
+            try:
+                data = json.loads(raw_output)
                 ai_response = (
                     data.get("response")
                     or data.get("message")
                     or data.get("content")
                     or data.get("text")
-                    or data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    or data.get("reply")
                     or str(data)
                 )
+            except json.JSONDecodeError:
+                # If not valid JSON, use raw output as the response
+                logger.warning("OpenClaw output was not JSON, using raw text")
+                ai_response = raw_output
 
-                # Add AI response to history
-                self._conversation_history.append({
-                    "role": "assistant",
-                    "content": ai_response,
-                })
+            logger.info(f"OpenClaw response: '{ai_response[:80]}...' "
+                        if len(ai_response) > 80
+                        else f"OpenClaw response: '{ai_response}'")
 
-                logger.info(f"OpenClaw response: '{ai_response[:80]}...' "
-                            if len(ai_response) > 80
-                            else f"OpenClaw response: '{ai_response}'")
+            return ai_response
 
-                return ai_response
-
-        except aiohttp.ClientError as e:
-            logger.error(f"OpenClaw connection error: {e}")
-            raise Exception(f"Failed to connect to OpenClaw at {self.base_url}: {e}")
+        except asyncio.TimeoutError:
+            logger.error("OpenClaw CLI timed out after 120 seconds")
+            raise Exception("Anorak took too long to respond")
+        except FileNotFoundError:
+            logger.error("'openclaw' command not found in PATH")
+            raise Exception("openclaw CLI not found — is it installed and in PATH?")
         except Exception as e:
             logger.error(f"OpenClaw error: {e}")
             raise
 
     def clear_history(self) -> None:
-        """Clear conversation history for a new session."""
-        self._conversation_history.clear()
-        logger.info("Conversation history cleared")
+        """Clear conversation history (no-op for CLI mode)."""
+        logger.info("Conversation history clear requested (CLI mode)")
 
     async def close(self) -> None:
-        """Close the HTTP session."""
-        if self._session and not self._session.closed:
-            await self._session.close()
-            self._session = None
+        """No cleanup needed for CLI mode."""
+        pass
 
 
 # Singleton instance
 openclaw_client = OpenClawClient()
+

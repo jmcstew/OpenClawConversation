@@ -1,7 +1,7 @@
 """ElevenLabs API client for Speech-to-Text (Scribe) and Text-to-Speech."""
 
 import logging
-from typing import AsyncGenerator
+import requests
 from elevenlabs import ElevenLabs
 from .config import settings
 
@@ -13,12 +13,13 @@ class ElevenLabsClient:
 
     def __init__(self):
         self._client = ElevenLabs(api_key=settings.ELEVENLABS_API_KEY)
+        self.api_key = settings.ELEVENLABS_API_KEY
         self.voice_id = settings.ELEVENLABS_VOICE_ID
         self.tts_model = settings.ELEVENLABS_TTS_MODEL
 
     def transcribe(self, audio_data: bytes, language: str = "en") -> str:
         """
-        Transcribe audio using ElevenLabs Scribe v2.
+        Transcribe audio using ElevenLabs Scribe via REST API.
 
         Args:
             audio_data: Raw audio bytes (WebM/Opus from browser MediaRecorder)
@@ -30,13 +31,19 @@ class ElevenLabsClient:
         try:
             logger.info(f"Sending {len(audio_data)} bytes to Scribe for transcription")
 
-            result = self._client.speech_to_text.convert(
-                file=audio_data,
-                model_id="scribe_v2",
-                language_code=language,
+            response = requests.post(
+                "https://api.elevenlabs.io/v1/speech-to-text",
+                headers={"xi-api-key": self.api_key},
+                files={"file": ("audio.webm", audio_data, "audio/webm")},
+                data={
+                    "model_id": "scribe_v2",
+                    "language_code": language,
+                },
             )
+            response.raise_for_status()
+            result = response.json()
 
-            transcript = result.text.strip()
+            transcript = result.get("text", "").strip()
             logger.info(f"Transcription result: '{transcript}'")
             return transcript
 
