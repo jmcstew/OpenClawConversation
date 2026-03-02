@@ -2,7 +2,8 @@
  * Low-level WebSocket wrapper with event handling and reconnection.
  */
 
-const DEFAULT_WS_URL = 'ws://localhost:8000/ws';
+const WS_PORT = 8513;
+const DEFAULT_WS_URL = `ws://${window.location.hostname}:${WS_PORT}/ws`;
 
 export class WebSocketService {
   constructor(url = DEFAULT_WS_URL) {
@@ -108,7 +109,7 @@ export class WebSocketService {
 
     setTimeout(() => {
       if (!this._intentionalClose) {
-        this.connect().catch(() => {});
+        this.connect().catch(() => { });
       }
     }, delay);
   }

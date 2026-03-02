@@ -23,7 +23,7 @@ class Settings:
 
     # Server
     HOST: str = os.getenv("HOST", "0.0.0.0")
-    PORT: int = int(os.getenv("PORT", "8000"))
+    PORT: int = int(os.getenv("PORT", "8513"))
 
     def validate(self) -> list[str]:
         """Return list of missing required config values."""

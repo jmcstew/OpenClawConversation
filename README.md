@@ -11,7 +11,7 @@ cd backend
 pip install -r requirements.txt
 cp .env.example .env
 # Edit .env with your API keys
-python -m uvicorn app.main:app --reload --port 8000
+python -m uvicorn app.main:app --reload --port 8513
 ```
 
 ### 2. Frontend
